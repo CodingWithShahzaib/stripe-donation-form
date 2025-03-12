@@ -1,63 +1,81 @@
 # Stripe Donation Form
 
-## Description
-This project is a simple donation form built using React and Stripe. It allows users to make donations using their credit cards. The form is styled using CSS and includes a thank you page that displays the donation details.
+A React application that allows users to make one-time donations or subscribe to monthly donations using Stripe.
 
-## Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/stripe-donation-form.git
+## Features
+
+- One-time donations
+- Monthly subscription donations
+- Secure payment processing with Stripe
+- Responsive design
+
+## Project Structure
+
+- `src/` - Frontend React application
+- `server/` - Backend Express server for Stripe integration
+
+## Setup
+
+### Frontend
+
+1. Install dependencies:
    ```
-2. Navigate to the project directory:
-   ```bash
-   cd stripe-donation-form
-   ```
-3. Install the dependencies:
-   ```bash
    npm install
    ```
 
-## Usage
-1. Start the development server:
-   ```bash
+2. Create a `.env` file in the root directory with your Stripe publishable key:
+   ```
+   REACT_APP_STRIPE_PUBLISHABLE_KEY=pk_test_your_publishable_key
+   REACT_APP_BACKEND_URL=http://localhost:3001
+   ```
+
+3. Start the development server:
+   ```
    npm start
    ```
-2. Open your browser and navigate to `http://localhost:3000`.
 
-## Folder Structure
+### Backend
+
+1. Navigate to the server directory:
+   ```
+   cd server
+   ```
+
+2. Install dependencies:
+   ```
+   npm install
+   ```
+
+3. Create a `.env` file in the server directory:
+   ```
+   STRIPE_SECRET_KEY=sk_test_your_secret_key
+   STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+   ```
+
+4. Start the server:
+   ```
+   npm start
+   ```
+
+## Webhook Testing
+
+To test webhooks locally, use the Stripe CLI:
+
 ```
-stripe-donation-form/
-├── public/
-│   ├── favicon.ico
-│   ├── index.html
-│   ├── logo192.png
-│   ├── logo512.png
-│   ├── manifest.json
-│   └── robots.txt
-├── src/
-│   ├── components/
-│   │   ├── DonationForm/
-│   │   │   ├── DonationForm.js
-│   │   │   └── DonationForm.css
-│   │   ├── ThankYou/
-│   │   │   ├── ThankYou.js
-│   │   │   └── ThankYou.css
-│   ├── App.css
-│   ├── App.js
-│   ├── App.test.js
-│   ├── index.css
-│   ├── index.js
-│   ├── logo.svg
-│   ├── reportWebVitals.js
-│   ├── setupTests.js
-├── .gitignore
-├── package-lock.json
-├── package.json
-└── README.md
+stripe listen --forward-to localhost:3001/webhook
 ```
 
-## Contributing
-Contributions are welcome! Please open an issue or submit a pull request for any improvements or bug fixes.
+The CLI will output a webhook signing secret that looks like:
+```
+Ready! Your webhook signing secret is whsec_xxxxxxxxxxxx
+```
 
-## License
-This project is licensed under the MIT License.
+Copy this value to your server's `.env` file as `STRIPE_WEBHOOK_SECRET`.
+
+## Troubleshooting
+
+If you see the error "No stripe-signature header value was provided", make sure:
+
+1. You're using the Stripe CLI to forward webhook events
+2. You've set the correct webhook secret in your server's `.env` file
+3. The server is using `express.raw()` middleware for the webhook route

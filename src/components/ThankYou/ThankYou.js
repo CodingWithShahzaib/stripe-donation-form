@@ -4,7 +4,15 @@ import './ThankYou.css';
 
 const ThankYou = () => {
   const location = useLocation();
-  const { amount, fullName, email, paymentMethod } = location.state || {};
+  const { 
+    amount, 
+    fullName, 
+    email, 
+    paymentMethod, 
+    isSubscription, 
+    paymentType,
+    paymentId
+  } = location.state || {};
   const navigate = useNavigate();
 
   const handleGoBack = () => {
@@ -59,14 +67,32 @@ const ThankYou = () => {
               
               <div className="receipt-row">
                 <span className="receipt-label">Amount:</span>
-                <span className="receipt-value receipt-amount">${amount}</span>
+                <span className="receipt-value receipt-amount">
+                  ${amount}{isSubscription ? ' monthly' : ''}
+                </span>
+              </div>
+              
+              <div className="receipt-row">
+                <span className="receipt-label">Frequency:</span>
+                <span className="receipt-value">
+                  {isSubscription ? 'Monthly subscription' : 'One-time donation'}
+                </span>
               </div>
               
               {paymentMethod && (
                 <div className="receipt-row">
                   <span className="receipt-label">Payment Method:</span>
                   <span className="receipt-value">
-                    {paymentMethod.card.brand.toUpperCase()} ending in {paymentMethod.card.last4}
+                    Credit Card (ID: {typeof paymentMethod === 'string' ? paymentMethod.substring(0, 8) + '...' : 'Card'})
+                  </span>
+                </div>
+              )}
+              
+              {paymentId && (
+                <div className="receipt-row">
+                  <span className="receipt-label">Transaction ID:</span>
+                  <span className="receipt-value">
+                    {paymentId.substring(0, 12) + '...'}
                   </span>
                 </div>
               )}
@@ -74,6 +100,11 @@ const ThankYou = () => {
             
             <div className="receipt-message">
               <p>A receipt has been sent to your email address.</p>
+              {isSubscription && (
+                <p className="subscription-note">
+                  Your subscription will automatically renew each month. You can cancel anytime by contacting us.
+                </p>
+              )}
             </div>
           </div>
         )}

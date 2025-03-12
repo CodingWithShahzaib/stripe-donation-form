@@ -102,6 +102,13 @@
   font-size: 0.875rem;
 }
 
+.subscription-note {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed #dbeafe;
+  font-weight: 500;
+}
+
 .action-buttons {
   display: flex;
   gap: 1rem;

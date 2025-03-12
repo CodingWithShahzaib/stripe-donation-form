@@ -6,8 +6,9 @@ import './DonationForm.css';
 import AmountSelection from './AmountSelection';
 import FormFields from './FormFields';
 import CardInformation from './CardInformation';
+import { createOneTimePayment, createSubscription } from '../../api/stripe';
 
-const stripePromise = loadStripe('pk_test_TYooMQauvdEDq54NiTphI7jx');
+const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 'pk_test_TYooMQauvdEDq54NiTphI7jx');
 
 const DonationFormContent = () => {
   const [amount, setAmount] = useState('');
@@ -16,6 +17,7 @@ const DonationFormContent = () => {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSubscription, setIsSubscription] = useState(false);
   const navigate = useNavigate();
   const stripe = useStripe();
   const elements = useElements();
@@ -30,6 +32,10 @@ const DonationFormContent = () => {
   const handleCustomAmountChange = (e) => {
     setCustomAmount(e.target.value);
     setAmount(e.target.value);
+  };
+
+  const toggleSubscription = () => {
+    setIsSubscription(!isSubscription);
   };
 
   const cardElementOptions = {
@@ -79,13 +85,39 @@ const DonationFormContent = () => {
         setMessage(`Payment failed: ${error.message}`);
         setIsProcessing(false);
       } else {
-        // Simulate a server confirmation of payment success
-        const paymentSuccess = true; // Replace with actual backend confirmation
+        try {
+          // Call the appropriate backend API endpoint based on donation type
+          let response;
+          if (isSubscription) {
+            response = await createSubscription({
+              paymentMethodId: paymentMethod.id,
+              email,
+              amount: parseFloat(amount),
+              fullName
+            });
+          } else {
+            response = await createOneTimePayment({
+              paymentMethodId: paymentMethod.id,
+              email,
+              amount: parseFloat(amount),
+              fullName
+            });
+          }
 
-        if (paymentSuccess) {
-          navigate('/thank-you', { state: { amount, fullName, email, paymentMethod } });
-        } else {
-          setMessage('Payment failed. Please try again.');
+          // If we get here, the payment was successful
+          navigate('/thank-you', { 
+            state: { 
+              amount, 
+              fullName, 
+              email, 
+              paymentMethod: paymentMethod.id,
+              isSubscription,
+              paymentType: isSubscription ? 'monthly' : 'one-time',
+              paymentId: response.id
+            } 
+          });
+        } catch (error) {
+          setMessage(`Payment processing failed: ${error.message}`);
           setIsProcessing(false);
         }
       }
@@ -103,6 +135,26 @@ const DonationFormContent = () => {
           <p>Your support helps us make a difference</p>
         </div>
         
+        <div className="form-section donation-type-selector">
+          <label className="form-label">Donation Type</label>
+          <div className="donation-type-options">
+            <button
+              type="button"
+              className={`donation-type-option ${!isSubscription ? 'selected' : ''}`}
+              onClick={() => setIsSubscription(false)}
+            >
+              One-time
+            </button>
+            <button
+              type="button"
+              className={`donation-type-option ${isSubscription ? 'selected' : ''}`}
+              onClick={() => setIsSubscription(true)}
+            >
+              Monthly
+            </button>
+          </div>
+        </div>
+        
         <AmountSelection 
           predefinedAmounts={predefinedAmounts} 
           amount={amount} 
@@ -110,6 +162,12 @@ const DonationFormContent = () => {
           handleAmountSelect={handleAmountSelect} 
           handleCustomAmountChange={handleCustomAmountChange} 
         />
+        
+        {isSubscription && (
+          <div className="subscription-info-box">
+            <p>You will be charged ${amount || '0'} monthly until you cancel.</p>
+          </div>
+        )}
         
         <FormFields 
           fullName={fullName} 
@@ -125,7 +183,9 @@ const DonationFormContent = () => {
           disabled={!stripe || isProcessing} 
           className="donation-submit-button"
         >
-          {isProcessing ? 'Processing...' : `Donate $${amount || '0'}`}
+          {isProcessing ? 'Processing...' : isSubscription 
+            ? `Subscribe $${amount || '0'}/month` 
+            : `Donate $${amount || '0'}`}
         </button>
         
         {message && (
