@@ -24,6 +24,22 @@ app.post('/create-payment', async (req, res) => {
   try {
     const { paymentMethodId, email, amount, fullName } = req.body;
 
+    // Validate required fields
+    if (!paymentMethodId) {
+      return res.status(400).json({ message: 'Payment method ID is required' });
+    }
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      return res.status(400).json({ message: 'Valid amount is required' });
+    }
+    if (!fullName) {
+      return res.status(400).json({ message: 'Full name is required' });
+    }
+
+    console.log(`Creating payment with method ID: ${paymentMethodId}`);
+
     // Create a customer
     const customer = await stripe.customers.create({
       email,
@@ -31,19 +47,19 @@ app.post('/create-payment', async (req, res) => {
       payment_method: paymentMethodId,
     });
 
+    console.log(`Customer created: ${customer.id}`);
+
     // Create a payment intent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: amount * 100, // Convert to cents
+      amount: Math.round(parseFloat(amount) * 100), // Convert to cents
       currency: 'usd',
       customer: customer.id,
       payment_method: paymentMethodId,
       confirm: true,
       description: `One-time donation of $${amount} from ${fullName}`,
-      automatic_payment_methods: {
-        enabled: true,
-        allow_redirects: 'never'
-      }
     });
+
+    console.log(`Payment intent created: ${paymentIntent.id}, status: ${paymentIntent.status}`);
 
     res.json({
       id: paymentIntent.id,
@@ -61,65 +77,82 @@ app.post('/create-subscription', async (req, res) => {
   try {
     const { paymentMethodId, email, amount, fullName } = req.body;
 
-    // Create a customer
-    const customer = await stripe.customers.create({
-      email,
-      name: fullName,
-      payment_method: paymentMethodId,
-    });
-
-    // Set the payment method as the default for the customer
-    await stripe.customers.update(customer.id, {
-      invoice_settings: {
-        default_payment_method: paymentMethodId,
-      },
-    });
-
-    // Create a product for the subscription if it doesn't exist
-    const product = await stripe.products.create({
-      name: 'Monthly Donation',
-    });
-
-    // Create a price for the subscription
-    const price = await stripe.prices.create({
-      product: product.id,
-      unit_amount: amount * 100, // Convert to cents
-      currency: 'usd',
-      recurring: {
-        interval: 'month',
-      },
-    });
-
-    // Create the subscription
-    const subscription = await stripe.subscriptions.create({
-      customer: customer.id,
-      items: [{ price: price.id }],
-      payment_behavior: 'default_incomplete',
-      expand: ['latest_invoice.payment_intent'],
-      payment_settings: {
-        payment_method_types: ['card'],
-        save_default_payment_method: 'on_subscription',
-      },
-    });
-
-    // If there's a payment intent, configure it to not use redirects
-    if (subscription.latest_invoice && subscription.latest_invoice.payment_intent) {
-      await stripe.paymentIntents.update(
-        subscription.latest_invoice.payment_intent.id,
-        {
-          automatic_payment_methods: {
-            enabled: true,
-            allow_redirects: 'never'
-          }
-        }
-      );
+    // Validate required fields
+    if (!paymentMethodId) {
+      return res.status(400).json({ message: 'Payment method ID is required' });
+    }
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      return res.status(400).json({ message: 'Valid amount is required' });
+    }
+    if (!fullName) {
+      return res.status(400).json({ message: 'Full name is required' });
     }
 
-    res.json({
-      id: subscription.id,
-      status: subscription.status,
-      customer: customer.id,
-    });
+    console.log(`Creating subscription with method ID: ${paymentMethodId}`);
+
+    try {
+      // Create a customer
+      const customer = await stripe.customers.create({
+        email,
+        name: fullName,
+        payment_method: paymentMethodId,
+      });
+
+      console.log(`Customer created: ${customer.id}`);
+
+      // Set the payment method as the default for the customer
+      await stripe.customers.update(customer.id, {
+        invoice_settings: {
+          default_payment_method: paymentMethodId,
+        },
+      });
+
+      console.log(`Customer updated with default payment method`);
+
+      // Create a product for the subscription if it doesn't exist
+      const product = await stripe.products.create({
+        name: 'Monthly Donation',
+      });
+
+      console.log(`Product created: ${product.id}`);
+
+      // Create a price for the subscription
+      const price = await stripe.prices.create({
+        product: product.id,
+        unit_amount: Math.round(parseFloat(amount) * 100), // Convert to cents
+        currency: 'usd',
+        recurring: {
+          interval: 'month',
+        },
+      });
+
+      console.log(`Price created: ${price.id}`);
+
+      // Create the subscription
+      const subscription = await stripe.subscriptions.create({
+        customer: customer.id,
+        items: [{ price: price.id }],
+        payment_behavior: 'default_incomplete',
+        expand: ['latest_invoice.payment_intent'],
+        payment_settings: {
+          save_default_payment_method: 'on_subscription',
+        },
+      });
+
+      console.log(`Subscription created: ${subscription.id}, status: ${subscription.status}`);
+
+      res.json({
+        id: subscription.id,
+        status: subscription.status,
+        customer: customer.id,
+      });
+    } catch (stripeError) {
+      console.error('Stripe API error:', stripeError);
+      throw new Error(stripeError.message);
+    }
   } catch (error) {
     console.error('Subscription error:', error);
     res.status(400).json({ message: error.message });

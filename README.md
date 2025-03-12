@@ -79,3 +79,39 @@ If you see the error "No stripe-signature header value was provided", make sure:
 1. You're using the Stripe CLI to forward webhook events
 2. You've set the correct webhook secret in your server's `.env` file
 3. The server is using `express.raw()` middleware for the webhook route
+
+## Google Pay and Apple Pay Integration
+
+This donation form now supports Google Pay and Apple Pay for a faster checkout experience. Here's what you need to know:
+
+### Requirements
+
+- **Google Pay**: Works on Chrome, Firefox, Safari, and Microsoft Edge on Android devices and desktop.
+- **Apple Pay**: Works on Safari on iOS devices (iPhone, iPad) and macOS.
+
+### Testing
+
+- **Google Pay**: You can test Google Pay in Chrome's developer mode. No real card is required.
+- **Apple Pay**: Testing Apple Pay requires an Apple device with Safari and a card added to Apple Wallet.
+
+### Implementation Details
+
+The implementation uses Stripe's Payment Request Button which automatically detects the available payment methods based on the browser and device. The button will only appear if at least one digital wallet payment method is available.
+
+### Configuration
+
+Make sure your Stripe account is properly configured to accept these payment methods:
+
+1. Log in to your Stripe Dashboard
+2. Go to Settings > Payment methods
+3. Enable Google Pay and Apple Pay
+4. For Apple Pay, you'll need to register your domain with Apple
+
+### Troubleshooting
+
+If the wallet payment options don't appear:
+
+- Ensure you're using a supported browser and device
+- Check that you have cards added to your digital wallet
+- Verify that your Stripe account is properly configured
+- Make sure your site is served over HTTPS (required for production)

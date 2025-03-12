@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,154 @@ import CardInformation from './CardInformation';
 import { createOneTimePayment, createSubscription } from '../../api/stripe';
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 'pk_test_TYooMQauvdEDq54NiTphI7jx');
+
+// New component for Express Checkout
+const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuccess, onPaymentError }) => {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [expressCheckoutElement, setExpressCheckoutElement] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!stripe || !elements || !amount || amount <= 0) return;
+
+    // Clean up previous elements
+    if (expressCheckoutElement) {
+      expressCheckoutElement.unmount();
+    }
+
+    const amountInCents = Math.round(parseFloat(amount) * 100);
+    console.log(`Setting up Express Checkout with amount: ${amount} (${amountInCents} cents)`);
+    
+    const expressCheckoutOptions = {
+      buttonType: {
+        applePay: 'donate',
+        googlePay: 'donate',
+      }
+    };
+
+    // Create Elements instance with payment details
+    const newElementsInstance = stripe.elements({
+      mode: isSubscription ? 'subscription' : 'payment',
+      amount: amountInCents,
+      currency: 'usd',
+      appearance: {
+        theme: 'stripe',
+      },
+      // Add billing details
+      paymentMethodCreationParams: {
+        billing_details: {
+          name: fullName,
+          email: email,
+        }
+      },
+      paymentMethodCreation: 'manual'
+    });
+
+    // Create and mount the Express Checkout Element
+    const newExpressCheckoutElement = newElementsInstance.create(
+      'expressCheckout',
+      expressCheckoutOptions
+    );
+
+    newExpressCheckoutElement.on('loaderror', (event) => {
+      console.error('Express Checkout load error:', event);
+    });
+
+    newExpressCheckoutElement.on('ready', () => {
+      console.log('Express Checkout is ready');
+    });
+
+    newExpressCheckoutElement.on('confirm', async (event) => {
+      try {
+        setIsLoading(true);
+        console.log('Express Checkout confirm event:', event);
+        
+        // Create a payment method using the Elements instance with manual creation
+        const { error: paymentMethodError, paymentMethod } = await stripe.createPaymentMethod({
+          elements: newElementsInstance,
+          params: {
+            billing_details: {
+              name: fullName,
+              email: email,
+            },
+          },
+        });
+        
+        if (paymentMethodError) {
+          console.error('Payment method creation error:', paymentMethodError);
+          throw new Error(`Payment method creation failed: ${paymentMethodError.message}`);
+        }
+        
+        if (!paymentMethod || !paymentMethod.id) {
+          throw new Error('Payment method information is missing');
+        }
+        
+        const paymentMethodId = paymentMethod.id;
+        console.log(`Created payment method ID: ${paymentMethodId} of type: ${paymentMethod.type}`);
+        
+        // Call the appropriate backend API endpoint based on donation type
+        let response;
+        try {
+          if (isSubscription) {
+            console.log(`Creating subscription with payment method ${paymentMethodId}`);
+            response = await createSubscription({
+              paymentMethodId,
+              email,
+              amount: parseFloat(amount),
+              fullName
+            });
+          } else {
+            console.log(`Creating one-time payment with payment method ${paymentMethodId}`);
+            response = await createOneTimePayment({
+              paymentMethodId,
+              email,
+              amount: parseFloat(amount),
+              fullName
+            });
+          }
+          
+          console.log('Payment response:', response);
+          onPaymentSuccess({
+            amount, 
+            fullName, 
+            email, 
+            paymentMethod: paymentMethodId,
+            isSubscription,
+            paymentType: isSubscription ? 'monthly' : 'one-time',
+            paymentId: response.id
+          });
+        } catch (apiError) {
+          console.error('API error:', apiError);
+          throw new Error(apiError.message || 'Payment processing failed');
+        }
+      } catch (error) {
+        console.error('Express Checkout error:', error);
+        onPaymentError(`Payment processing failed: ${error.message}`);
+      } finally {
+        setIsLoading(false);
+      }
+    });
+
+    newExpressCheckoutElement.mount('#express-checkout-element');
+    setExpressCheckoutElement(newExpressCheckoutElement);
+
+    return () => {
+      if (newExpressCheckoutElement) {
+        newExpressCheckoutElement.unmount();
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stripe, elements, amount, isSubscription, fullName, email, onPaymentSuccess, onPaymentError]);
+
+  return (
+    <div className="express-checkout-section">
+      <div className="express-checkout-label">Pay faster with</div>
+      <div id="express-checkout-element" className={`express-checkout-container ${isLoading ? 'loading' : ''}`}></div>
+      {isLoading && <div className="express-checkout-loading">Processing payment...</div>}
+    </div>
+  );
+};
 
 const DonationFormContent = () => {
   const [amount, setAmount] = useState('');
@@ -56,6 +204,15 @@ const DonationFormContent = () => {
     },
     hidePostalCode: true,
     iconStyle: 'solid',
+  };
+
+  const handlePaymentSuccess = (paymentData) => {
+    navigate('/thank-you', { state: paymentData });
+  };
+
+  const handlePaymentError = (errorMessage) => {
+    setMessage(errorMessage);
+    setIsProcessing(false);
   };
 
   const handleSubmit = async (event) => {
@@ -175,6 +332,21 @@ const DonationFormContent = () => {
           email={email} 
           setEmail={setEmail} 
         />
+
+        {amount > 0 && (
+          <ExpressCheckout 
+            amount={amount}
+            isSubscription={isSubscription}
+            fullName={fullName}
+            email={email}
+            onPaymentSuccess={handlePaymentSuccess}
+            onPaymentError={handlePaymentError}
+          />
+        )}
+        
+        <div className="or-separator">
+          <span>OR</span>
+        </div>
         
         <CardInformation cardElementOptions={cardElementOptions} />
         

@@ -318,3 +318,58 @@
   margin: 0;
   font-size: 14px;
 }
+
+/* Express Checkout Styles */
+.express-checkout-section {
+  margin-bottom: 20px;
+  width: 100%;
+  position: relative;
+}
+
+.express-checkout-label {
+  font-size: 14px;
+  color: #6b7280;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.express-checkout-container {
+  width: 100%;
+  min-height: 40px;
+  margin-bottom: 5px;
+}
+
+.express-checkout-container.loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.express-checkout-loading {
+  text-align: center;
+  font-size: 14px;
+  color: #6b7280;
+  margin-top: 8px;
+  font-style: italic;
+}
+
+/* OR Separator */
+.or-separator {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 20px 0;
+  color: #6b7280;
+}
+
+.or-separator::before,
+.or-separator::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.or-separator span {
+  padding: 0 10px;
+  font-size: 14px;
+  text-transform: uppercase;
+}
