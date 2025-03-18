@@ -50,6 +50,7 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
           email: email,
         }
       },
+      payment_method_types: ['card', 'link'],
       paymentMethodCreation: 'manual'
     });
 
@@ -114,6 +115,15 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
               amount: parseFloat(amount),
               fullName
             });
+            
+            // For one-time payments, check if we need to confirm
+            if (response.status === 'requires_action' || response.status === 'requires_confirmation') {
+              console.log('One-time payment requires confirmation');
+              const { error: confirmError } = await stripe.confirmCardPayment(response.client_secret);
+              if (confirmError) {
+                throw new Error(confirmError.message);
+              }
+            }
           }
           
           console.log('Payment response:', response);
@@ -229,7 +239,7 @@ const DonationFormContent = () => {
     const cardElement = elements.getElement(CardElement);
 
     try {
-      const { paymentMethod, error } = await stripe.createPaymentMethod({
+      const { paymentMethod, error: paymentMethodError } = await stripe.createPaymentMethod({
         type: 'card',
         card: cardElement,
         billing_details: {
@@ -238,45 +248,55 @@ const DonationFormContent = () => {
         },
       });
 
-      if (error) {
-        setMessage(`Payment failed: ${error.message}`);
+      if (paymentMethodError) {
+        setMessage(`Payment failed: ${paymentMethodError.message}`);
         setIsProcessing(false);
-      } else {
-        try {
-          // Call the appropriate backend API endpoint based on donation type
-          let response;
-          if (isSubscription) {
-            response = await createSubscription({
-              paymentMethodId: paymentMethod.id,
-              email,
-              amount: parseFloat(amount),
-              fullName
-            });
-          } else {
-            response = await createOneTimePayment({
-              paymentMethodId: paymentMethod.id,
-              email,
-              amount: parseFloat(amount),
-              fullName
-            });
-          }
+        return;
+      }
 
-          // If we get here, the payment was successful
-          navigate('/thank-you', { 
-            state: { 
-              amount, 
-              fullName, 
-              email, 
-              paymentMethod: paymentMethod.id,
-              isSubscription,
-              paymentType: isSubscription ? 'monthly' : 'one-time',
-              paymentId: response.id
-            } 
+      try {
+        // Call the appropriate backend API endpoint based on donation type
+        let response;
+        if (isSubscription) {
+          response = await createSubscription({
+            paymentMethodId: paymentMethod.id,
+            email,
+            amount: parseFloat(amount),
+            fullName
           });
-        } catch (error) {
-          setMessage(`Payment processing failed: ${error.message}`);
-          setIsProcessing(false);
+          // For subscriptions, we don't need to confirm - the server handles it
+        } else {
+          response = await createOneTimePayment({
+            paymentMethodId: paymentMethod.id,
+            email,
+            amount: parseFloat(amount),
+            fullName
+          });
+
+          // Check if additional confirmation is needed for one-time payments
+          if (response.status === 'requires_action' || response.status === 'requires_confirmation') {
+            const { error: confirmError } = await stripe.confirmCardPayment(response.client_secret);
+            if (confirmError) {
+              throw new Error(confirmError.message);
+            }
+          }
         }
+
+        // If we get here, the payment was successful
+        navigate('/thank-you', { 
+          state: { 
+            amount, 
+            fullName, 
+            email, 
+            paymentMethod: paymentMethod.id,
+            isSubscription,
+            paymentType: isSubscription ? 'monthly' : 'one-time',
+            paymentId: response.id
+          } 
+        });
+      } catch (error) {
+        setMessage(`Payment processing failed: ${error.message}`);
+        setIsProcessing(false);
       }
     } catch (error) {
       setMessage(`An error occurred: ${error.message}`);

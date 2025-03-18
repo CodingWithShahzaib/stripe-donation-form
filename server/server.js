@@ -51,12 +51,15 @@ app.post('/create-payment', async (req, res) => {
 
     // Create a payment intent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(parseFloat(amount) * 100), // Convert to cents
+      amount: amount * 100, // Convert to cents
       currency: 'usd',
       customer: customer.id,
       payment_method: paymentMethodId,
-      confirm: true,
       description: `One-time donation of $${amount} from ${fullName}`,
+      payment_method_types: ['card', 'link'],
+      confirm: true,
+      off_session: true,
+      confirmation_method: 'automatic'
     });
 
     console.log(`Payment intent created: ${paymentIntent.id}, status: ${paymentIntent.status}`);
@@ -65,6 +68,7 @@ app.post('/create-payment', async (req, res) => {
       id: paymentIntent.id,
       status: paymentIntent.status,
       customer: customer.id,
+      client_secret: paymentIntent.client_secret
     });
   } catch (error) {
     console.error('Payment error:', error);
@@ -122,7 +126,7 @@ app.post('/create-subscription', async (req, res) => {
       // Create a price for the subscription
       const price = await stripe.prices.create({
         product: product.id,
-        unit_amount: Math.round(parseFloat(amount) * 100), // Convert to cents
+        unit_amount: amount * 100, // Convert to cents
         currency: 'usd',
         recurring: {
           interval: 'month',
@@ -135,19 +139,53 @@ app.post('/create-subscription', async (req, res) => {
       const subscription = await stripe.subscriptions.create({
         customer: customer.id,
         items: [{ price: price.id }],
-        payment_behavior: 'default_incomplete',
-        expand: ['latest_invoice.payment_intent'],
         payment_settings: {
-          save_default_payment_method: 'on_subscription',
+          payment_method_types: ['card', 'link'],
+          save_default_payment_method: 'on_subscription'
         },
+        expand: ['latest_invoice.payment_intent']
       });
 
       console.log(`Subscription created: ${subscription.id}, status: ${subscription.status}`);
+      
+      let clientSecret = null;
+      let paymentIntentId = null;
+      
+      // Handle the payment intent if it exists
+      if (subscription.latest_invoice && subscription.latest_invoice.payment_intent) {
+        const paymentIntent = subscription.latest_invoice.payment_intent;
+        paymentIntentId = paymentIntent.id;
+        clientSecret = paymentIntent.client_secret;
+        
+        console.log(`Found payment intent: ${paymentIntentId} with status: ${paymentIntent.status}`);
+        
+        // Only confirm if it's not already succeeded
+        if (paymentIntent.status !== 'succeeded') {
+          console.log(`Confirming payment intent: ${paymentIntentId}`);
+          try {
+            const confirmedIntent = await stripe.paymentIntents.confirm(
+              paymentIntentId,
+              {
+                payment_method: paymentMethodId,
+                off_session: true
+              }
+            );
+            console.log(`Payment intent confirmation result: ${confirmedIntent.status}`);
+          } catch (confirmError) {
+            console.error(`Error confirming payment intent: ${confirmError.message}`);
+            // Continue anyway, as the frontend might need to handle this
+          }
+        } else {
+          console.log(`Payment intent already succeeded, skipping confirmation`);
+        }
+      }
 
       res.json({
         id: subscription.id,
         status: subscription.status,
         customer: customer.id,
+        payment_intent: paymentIntentId,
+        client_secret: clientSecret
       });
     } catch (stripeError) {
       console.error('Stripe API error:', stripeError);
