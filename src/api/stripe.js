@@ -1,7 +1,7 @@
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 
-export const createSubscription = async ({ paymentMethodId, email, amount, fullName }) => {
-  console.log(`Creating subscription with: ${JSON.stringify({ paymentMethodId, email, amount, fullName })}`);
+export const createSubscription = async ({ paymentMethodId, email, amount, fullName, connectedAccountId }) => {
+  console.log(`Creating subscription with: ${JSON.stringify({ paymentMethodId, email, amount, fullName, connectedAccountId })}`);
   
   try {
     const response = await fetch(`${BACKEND_URL}/create-subscription`, {
@@ -14,6 +14,7 @@ export const createSubscription = async ({ paymentMethodId, email, amount, fullN
         email,
         amount,
         fullName,
+        connectedAccountId
       }),
     });
 
@@ -32,8 +33,8 @@ export const createSubscription = async ({ paymentMethodId, email, amount, fullN
   }
 };
 
-export const createOneTimePayment = async ({ paymentMethodId, email, amount, fullName }) => {
-  console.log(`Creating one-time payment with: ${JSON.stringify({ paymentMethodId, email, amount, fullName })}`);
+export const createOneTimePayment = async ({ paymentMethodId, email, amount, fullName, connectedAccountId }) => {
+  console.log(`Creating one-time payment with: ${JSON.stringify({ paymentMethodId, email, amount, fullName, connectedAccountId })}`);
   
   try {
     const response = await fetch(`${BACKEND_URL}/create-payment`, {
@@ -46,6 +47,7 @@ export const createOneTimePayment = async ({ paymentMethodId, email, amount, ful
         email,
         amount,
         fullName,
+        connectedAccountId
       }),
     });
 

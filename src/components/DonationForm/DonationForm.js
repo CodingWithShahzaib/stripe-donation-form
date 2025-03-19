@@ -10,8 +10,11 @@ import { createOneTimePayment, createSubscription } from '../../api/stripe';
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 'pk_test_TYooMQauvdEDq54NiTphI7jx');
 
+// Your connected account ID - replace with your actual Stripe Connect account ID
+const CONNECTED_ACCOUNT_ID = process.env.REACT_APP_CONNECTED_ACCOUNT_ID; // Replace with your actual ID
+
 // New component for Express Checkout
-const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuccess, onPaymentError }) => {
+const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuccess, onPaymentError, connectedAccountId }) => {
   const stripe = useStripe();
   const elements = useElements();
   const [expressCheckoutElement, setExpressCheckoutElement] = useState(null);
@@ -105,19 +108,24 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
               paymentMethodId,
               email,
               amount: parseFloat(amount),
-              fullName
+              fullName,
+              connectedAccountId
             });
+
+            // Connected account subscriptions don't need confirmation with our new approach
           } else {
             console.log(`Creating one-time payment with payment method ${paymentMethodId}`);
             response = await createOneTimePayment({
               paymentMethodId,
               email,
               amount: parseFloat(amount),
-              fullName
+              fullName,
+              connectedAccountId
             });
             
-            // For one-time payments, check if we need to confirm
-            if (response.status === 'requires_action' || response.status === 'requires_confirmation') {
+            // Connected account payments don't need confirmation with our new approach
+            // Only check for regular payments on the platform account
+            if (!connectedAccountId && (response.status === 'requires_action' || response.status === 'requires_confirmation')) {
               console.log('One-time payment requires confirmation');
               const { error: confirmError } = await stripe.confirmCardPayment(response.client_secret);
               if (confirmError) {
@@ -134,7 +142,8 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
             paymentMethod: paymentMethodId,
             isSubscription,
             paymentType: isSubscription ? 'monthly' : 'one-time',
-            paymentId: response.id
+            paymentId: response.id,
+            connectedAccountId: response.connected_account
           });
         } catch (apiError) {
           console.error('API error:', apiError);
@@ -157,7 +166,7 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stripe, elements, amount, isSubscription, fullName, email, onPaymentSuccess, onPaymentError]);
+  }, [stripe, elements, amount, isSubscription, fullName, email, onPaymentSuccess, onPaymentError, connectedAccountId]);
 
   return (
     <div className="express-checkout-section">
@@ -176,6 +185,8 @@ const DonationFormContent = () => {
   const [message, setMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSubscription, setIsSubscription] = useState(false);
+  const [useConnectedAccount, setUseConnectedAccount] = useState(true);
+  
   const navigate = useNavigate();
   const stripe = useStripe();
   const elements = useElements();
@@ -194,6 +205,10 @@ const DonationFormContent = () => {
 
   const toggleSubscription = () => {
     setIsSubscription(!isSubscription);
+  };
+
+  const toggleConnectedAccount = () => {
+    setUseConnectedAccount(!useConnectedAccount);
   };
 
   const cardElementOptions = {
@@ -255,6 +270,9 @@ const DonationFormContent = () => {
       }
 
       try {
+        // Get the connected account ID if enabled
+        const connectedAccountId = useConnectedAccount ? CONNECTED_ACCOUNT_ID : null;
+        
         // Call the appropriate backend API endpoint based on donation type
         let response;
         if (isSubscription) {
@@ -262,19 +280,23 @@ const DonationFormContent = () => {
             paymentMethodId: paymentMethod.id,
             email,
             amount: parseFloat(amount),
-            fullName
+            fullName,
+            connectedAccountId
           });
-          // For subscriptions, we don't need to confirm - the server handles it
+          
+          // Connected account subscriptions don't need confirmation with our new approach
         } else {
           response = await createOneTimePayment({
             paymentMethodId: paymentMethod.id,
             email,
             amount: parseFloat(amount),
-            fullName
+            fullName,
+            connectedAccountId
           });
 
-          // Check if additional confirmation is needed for one-time payments
-          if (response.status === 'requires_action' || response.status === 'requires_confirmation') {
+          // Connected account payments don't need confirmation with our new approach
+          // Only check for regular payments on the platform account
+          if (!connectedAccountId && (response.status === 'requires_action' || response.status === 'requires_confirmation')) {
             const { error: confirmError } = await stripe.confirmCardPayment(response.client_secret);
             if (confirmError) {
               throw new Error(confirmError.message);
@@ -291,7 +313,9 @@ const DonationFormContent = () => {
             paymentMethod: paymentMethod.id,
             isSubscription,
             paymentType: isSubscription ? 'monthly' : 'one-time',
-            paymentId: response.id
+            paymentId: response.id,
+            connectedAccountId: response.connected_account,
+            recipientName: response.connected_account ? 'Connected Account' : 'Main Organization'
           } 
         });
       } catch (error) {
@@ -332,6 +356,33 @@ const DonationFormContent = () => {
           </div>
         </div>
         
+        {/* Connected Account Toggle */}
+        <div className="form-section connect-account-selector">
+          <label className="form-label">Recipient</label>
+          <div className="connect-account-options">
+            <button
+              type="button"
+              className={`connect-account-option ${!useConnectedAccount ? 'selected' : ''}`}
+              onClick={() => setUseConnectedAccount(false)}
+            >
+              Main Organization
+            </button>
+            <button
+              type="button"
+              className={`connect-account-option ${useConnectedAccount ? 'selected' : ''}`}
+              onClick={() => setUseConnectedAccount(true)}
+            >
+              Connected Account
+            </button>
+          </div>
+          {useConnectedAccount && (
+            <div className="connect-account-info">
+              <p>Your donation will go to our partner organization.</p>
+              <p className="fee-note">A small platform fee will be deducted to cover operating costs.</p>
+            </div>
+          )}
+        </div>
+        
         <AmountSelection 
           predefinedAmounts={predefinedAmounts} 
           amount={amount} 
@@ -361,6 +412,7 @@ const DonationFormContent = () => {
             email={email}
             onPaymentSuccess={handlePaymentSuccess}
             onPaymentError={handlePaymentError}
+            connectedAccountId={useConnectedAccount ? CONNECTED_ACCOUNT_ID : null}
           />
         )}
         

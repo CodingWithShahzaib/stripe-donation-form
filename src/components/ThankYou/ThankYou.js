@@ -11,7 +11,9 @@ const ThankYou = () => {
     paymentMethod, 
     isSubscription, 
     paymentType,
-    paymentId
+    paymentId,
+    connectedAccountId,
+    recipientName
   } = location.state || {};
   const navigate = useNavigate();
 
@@ -79,6 +81,15 @@ const ThankYou = () => {
                 </span>
               </div>
               
+              {recipientName && (
+                <div className="receipt-row">
+                  <span className="receipt-label">Recipient:</span>
+                  <span className="receipt-value">
+                    {recipientName}
+                  </span>
+                </div>
+              )}
+              
               {paymentMethod && (
                 <div className="receipt-row">
                   <span className="receipt-label">Payment Method:</span>
@@ -104,6 +115,12 @@ const ThankYou = () => {
                 <p className="subscription-note">
                   Your subscription will automatically renew each month. You can cancel anytime by contacting us.
                 </p>
+              )}
+              
+              {connectedAccountId && (
+                <div className="connected-account-info">
+                  <p>This donation will directly benefit <strong>{recipientName}</strong>, minus a small platform fee.</p>
+                </div>
               )}
             </div>
           </div>
