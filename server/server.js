@@ -27,7 +27,7 @@ const calculateApplicationFee = (amount, feePercentage = 0.1) => {
 // Create a one-time payment with Connect
 app.post('/create-payment', async (req, res) => {
   try {
-    const { paymentMethodId, email, amount, fullName, connectedAccountId } = req.body;
+    const { paymentMethodId, email, amount, fullName, connectedAccountId, returnUrl } = req.body;
 
     // Validate required fields
     if (!paymentMethodId) {
@@ -54,66 +54,32 @@ app.post('/create-payment', async (req, res) => {
       console.log(`Using connected account: ${connectedAccountId}`);
       
       try {
-        // First, create a customer on the platform
-        const customer = await stripe.customers.create({
-          email,
-          name: fullName,
-        });
-        
-        console.log(`Created customer on platform: ${customer.id}`);
-        
-        // Attach the payment method to the customer
-        await stripe.paymentMethods.attach(paymentMethodId, {
-          customer: customer.id,
-        });
-        
-        console.log(`Attached payment method ${paymentMethodId} to customer ${customer.id}`);
-        
-        // Create a token with test card details
-        const token = await stripe.tokens.create({
-          card: {
-            number: '4242424242424242', // Test card number
-            exp_month: 12,
-            exp_year: 2025,
-            cvc: '123'
-          }
-        });
-        
-        console.log(`Created token: ${token.id}`);
-        
         // Calculate application fee (platform's cut)
         const applicationFeeAmount = calculateApplicationFee(amountInCents);
         
-        // Create a customer on the connected account
-        const connectedCustomer = await stripe.customers.create(
-          {
-            email,
-            name: fullName,
-            source: token.id, // Use the token as the payment source
+        // Create payment intent directly on the connected account
+        const paymentIntentParams = {
+          amount: amountInCents,
+          currency: 'usd',
+          payment_method: paymentMethodId,
+          description: `One-time donation of $${amount} from ${fullName}`,
+          application_fee_amount: applicationFeeAmount,
+          confirm: true,
+          metadata: {
+            customer_email: email,
+            customer_name: fullName
           },
-          {
-            stripeAccount: connectedAccountId
+          // Add return URL for redirect-based payment methods
+          return_url: returnUrl || `${req.protocol}://${req.get('host')}/donation-confirmation`,
+          // Set automatic payment methods with valid value
+          automatic_payment_methods: {
+            enabled: true,
+            allow_redirects: 'always'  // Only 'always' or 'never' are valid values
           }
-        );
+        };
         
-        console.log(`Created customer on connected account: ${connectedCustomer.id}`);
-        
-        // Create payment intent on the connected account
         paymentIntent = await stripe.paymentIntents.create(
-          {
-            amount: amountInCents,
-            currency: 'usd',
-            customer: connectedCustomer.id,
-            description: `One-time donation of $${amount} from ${fullName}`,
-            payment_method_types: ['card'],
-            application_fee_amount: applicationFeeAmount,
-            confirm: true, // Confirm immediately since we have the source attached to the customer
-            metadata: {
-              customer_email: email,
-              customer_name: fullName,
-              platform_customer: customer.id
-            }
-          },
+          paymentIntentParams,
           {
             stripeAccount: connectedAccountId
           }
@@ -141,10 +107,16 @@ app.post('/create-payment', async (req, res) => {
         customer: customer.id,
         payment_method: paymentMethodId,
         description: `One-time donation of $${amount} from ${fullName}`,
-        payment_method_types: ['card', 'link'],
         confirm: true,
         off_session: true,
-        confirmation_method: 'automatic'
+        // Remove confirmation_method since we're using automatic_payment_methods
+        // return_url is required for automatic_payment_methods
+        return_url: returnUrl || `${req.protocol}://${req.get('host')}/donation-confirmation`,
+        // Set automatic payment methods with valid value
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: 'always'  // Only 'always' or 'never' are valid values
+        }
       });
     }
 
@@ -154,6 +126,7 @@ app.post('/create-payment', async (req, res) => {
       id: paymentIntent.id,
       status: paymentIntent.status,
       client_secret: paymentIntent.client_secret,
+      next_action: paymentIntent.next_action,
       connected_account: connectedAccountId || null
     });
   } catch (error) {
@@ -165,7 +138,7 @@ app.post('/create-payment', async (req, res) => {
 // Create a subscription with Connect
 app.post('/create-subscription', async (req, res) => {
   try {
-    const { paymentMethodId, email, amount, fullName, connectedAccountId } = req.body;
+    const { paymentMethodId, email, amount, fullName, connectedAccountId, returnUrl } = req.body;
 
     // Validate required fields
     if (!paymentMethodId) {
@@ -186,43 +159,16 @@ app.post('/create-subscription', async (req, res) => {
 
     try {
       if (connectedAccountId) {
-        // For connected accounts, subscriptions need a different approach
+        // For connected accounts, use a direct approach
         console.log(`Using connected account: ${connectedAccountId}`);
         
         try {
-          // First, create a customer on the platform
-          const customer = await stripe.customers.create({
-            email,
-            name: fullName,
-          });
-          
-          console.log(`Created customer on platform: ${customer.id}`);
-          
-          // Attach the payment method to the customer
-          await stripe.paymentMethods.attach(paymentMethodId, {
-            customer: customer.id,
-          });
-          
-          console.log(`Attached payment method ${paymentMethodId} to customer ${customer.id}`);
-          
-          // Create a token with test card details
-          const token = await stripe.tokens.create({
-            card: {
-              number: '4242424242424242', // Test card number
-              exp_month: 12,
-              exp_year: 2025,
-              cvc: '123'
-            }
-          });
-          
-          console.log(`Created token: ${token.id}`);
-          
-          // Create a customer on the connected account
+          // Create a customer directly on the connected account
           const connectedCustomer = await stripe.customers.create(
             {
               email,
               name: fullName,
-              source: token.id, // Use the token as the payment source
+              payment_method: paymentMethodId,
             },
             {
               stripeAccount: connectedAccountId
@@ -230,6 +176,21 @@ app.post('/create-subscription', async (req, res) => {
           );
           
           console.log(`Created customer on connected account: ${connectedCustomer.id}`);
+          
+          // Set the payment method as the default for the customer
+          await stripe.customers.update(
+            connectedCustomer.id,
+            {
+              invoice_settings: {
+                default_payment_method: paymentMethodId,
+              },
+            },
+            {
+              stripeAccount: connectedAccountId
+            }
+          );
+          
+          console.log(`Updated connected customer with default payment method`);
           
           // Create a product for the subscription on the connected account
           const product = await stripe.products.create(
@@ -267,10 +228,15 @@ app.post('/create-subscription', async (req, res) => {
               items: [{ price: price.id }],
               application_fee_percent: 10, // 10% platform fee
               metadata: {
-                platform_customer: customer.id,
                 customer_email: email,
                 customer_name: fullName
-              }
+              },
+              payment_behavior: 'default_incomplete',
+              payment_settings: {
+                payment_method_types: ['card'],
+                save_default_payment_method: 'on_subscription'
+              },
+              expand: ['latest_invoice.payment_intent']
             },
             {
               stripeAccount: connectedAccountId
@@ -279,10 +245,47 @@ app.post('/create-subscription', async (req, res) => {
           
           console.log(`Subscription created on connected account: ${subscription.id}, status: ${subscription.status}`);
           
+          let clientSecret = null;
+          let paymentIntentId = null;
+          let nextAction = null;
+          
+          // Check if there's a payment intent that needs action
+          if (subscription.latest_invoice && subscription.latest_invoice.payment_intent) {
+            const paymentIntent = subscription.latest_invoice.payment_intent;
+            paymentIntentId = paymentIntent.id;
+            clientSecret = paymentIntent.client_secret;
+            nextAction = paymentIntent.next_action;
+            
+            // Update the payment intent with return URL if needed
+            if (nextAction && nextAction.type === 'redirect_to_url') {
+              await stripe.paymentIntents.update(
+                paymentIntentId,
+                {
+                  return_url: returnUrl || `${req.protocol}://${req.get('host')}/donation-confirmation`
+                },
+                {
+                  stripeAccount: connectedAccountId
+                }
+              );
+              
+              // Get updated payment intent to get updated next_action
+              const updatedPaymentIntent = await stripe.paymentIntents.retrieve(
+                paymentIntentId,
+                {
+                  stripeAccount: connectedAccountId
+                }
+              );
+              
+              nextAction = updatedPaymentIntent.next_action;
+            }
+          }
+          
           res.json({
             id: subscription.id,
             status: subscription.status,
-            client_secret: null, // No client secret needed since payment is already confirmed
+            client_secret: clientSecret,
+            payment_intent: paymentIntentId,
+            next_action: nextAction,
             connected_account: connectedAccountId,
             type: 'subscription'
           });

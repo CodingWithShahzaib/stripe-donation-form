@@ -8,7 +8,23 @@ import FormFields from './FormFields';
 import CardInformation from './CardInformation';
 import { createOneTimePayment, createSubscription } from '../../api/stripe';
 
-const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 'pk_test_TYooMQauvdEDq54NiTphI7jx');
+// Initialize Stripe with or without connected account
+const getStripePromise = (connectedAccountId) => {
+  const stripeKey = process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 'pk_test_TYooMQauvdEDq54NiTphI7jx';
+  
+  if (connectedAccountId) {
+    console.log(`Initializing Stripe with connected account: ${connectedAccountId}`);
+    return loadStripe(stripeKey, {
+      stripeAccount: connectedAccountId
+    });
+  } else {
+    console.log('Initializing Stripe with platform account');
+    return loadStripe(stripeKey);
+  }
+};
+
+// Default Stripe instance (platform account)
+const stripePromise = getStripePromise();
 
 // Your connected account ID - replace with your actual Stripe Connect account ID
 const CONNECTED_ACCOUNT_ID = process.env.REACT_APP_CONNECTED_ACCOUNT_ID; // Replace with your actual ID
@@ -30,6 +46,7 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
 
     const amountInCents = Math.round(parseFloat(amount) * 100);
     console.log(`Setting up Express Checkout with amount: ${amount} (${amountInCents} cents)`);
+    console.log(`Using Connected Account ID: ${connectedAccountId || 'none (platform account)'}`);
     
     const expressCheckoutOptions = {
       buttonType: {
@@ -75,6 +92,7 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
       try {
         setIsLoading(true);
         console.log('Express Checkout confirm event:', event);
+        console.log(`Processing payment with Connected Account ID: ${connectedAccountId || 'none (platform account)'}`);
         
         // Create a payment method using the Elements instance with manual creation
         const { error: paymentMethodError, paymentMethod } = await stripe.createPaymentMethod({
@@ -111,8 +129,6 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
               fullName,
               connectedAccountId
             });
-
-            // Connected account subscriptions don't need confirmation with our new approach
           } else {
             console.log(`Creating one-time payment with payment method ${paymentMethodId}`);
             response = await createOneTimePayment({
@@ -122,16 +138,6 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
               fullName,
               connectedAccountId
             });
-            
-            // Connected account payments don't need confirmation with our new approach
-            // Only check for regular payments on the platform account
-            if (!connectedAccountId && (response.status === 'requires_action' || response.status === 'requires_confirmation')) {
-              console.log('One-time payment requires confirmation');
-              const { error: confirmError } = await stripe.confirmCardPayment(response.client_secret);
-              if (confirmError) {
-                throw new Error(confirmError.message);
-              }
-            }
           }
           
           console.log('Payment response:', response);
@@ -143,7 +149,7 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
             isSubscription,
             paymentType: isSubscription ? 'monthly' : 'one-time',
             paymentId: response.id,
-            connectedAccountId: response.connected_account
+            connectedAccountId
           });
         } catch (apiError) {
           console.error('API error:', apiError);
@@ -177,7 +183,7 @@ const ExpressCheckout = ({ amount, isSubscription, fullName, email, onPaymentSuc
   );
 };
 
-const DonationFormContent = () => {
+const DonationFormContent = ({ initialConnectedAccountState, setUseConnectedAccount }) => {
   const [amount, setAmount] = useState('');
   const [customAmount, setCustomAmount] = useState('');
   const [fullName, setFullName] = useState('');
@@ -185,7 +191,7 @@ const DonationFormContent = () => {
   const [message, setMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSubscription, setIsSubscription] = useState(false);
-  const [useConnectedAccount, setUseConnectedAccount] = useState(true);
+  const [useConnectedAccount, setConnectedAccountState] = useState(initialConnectedAccountState);
   
   const navigate = useNavigate();
   const stripe = useStripe();
@@ -208,7 +214,9 @@ const DonationFormContent = () => {
   };
 
   const toggleConnectedAccount = () => {
-    setUseConnectedAccount(!useConnectedAccount);
+    const newState = !useConnectedAccount;
+    setConnectedAccountState(newState);
+    setUseConnectedAccount(newState);
   };
 
   const cardElementOptions = {
@@ -252,6 +260,8 @@ const DonationFormContent = () => {
     setMessage('');
 
     const cardElement = elements.getElement(CardElement);
+    const connectedAccountId = useConnectedAccount ? CONNECTED_ACCOUNT_ID : null;
+    console.log(`Processing card payment with Connected Account ID: ${connectedAccountId || 'none (platform account)'}`);
 
     try {
       const { paymentMethod, error: paymentMethodError } = await stripe.createPaymentMethod({
@@ -268,14 +278,16 @@ const DonationFormContent = () => {
         setIsProcessing(false);
         return;
       }
+      
+      console.log(`Created payment method ID: ${paymentMethod.id} of type: ${paymentMethod.type}`);
 
       try {
         // Get the connected account ID if enabled
-        const connectedAccountId = useConnectedAccount ? CONNECTED_ACCOUNT_ID : null;
         
         // Call the appropriate backend API endpoint based on donation type
         let response;
         if (isSubscription) {
+          console.log(`Creating subscription with payment method ${paymentMethod.id}`);
           response = await createSubscription({
             paymentMethodId: paymentMethod.id,
             email,
@@ -283,9 +295,8 @@ const DonationFormContent = () => {
             fullName,
             connectedAccountId
           });
-          
-          // Connected account subscriptions don't need confirmation with our new approach
         } else {
+          console.log(`Creating one-time payment with payment method ${paymentMethod.id}`);
           response = await createOneTimePayment({
             paymentMethodId: paymentMethod.id,
             email,
@@ -293,16 +304,9 @@ const DonationFormContent = () => {
             fullName,
             connectedAccountId
           });
-
-          // Connected account payments don't need confirmation with our new approach
-          // Only check for regular payments on the platform account
-          if (!connectedAccountId && (response.status === 'requires_action' || response.status === 'requires_confirmation')) {
-            const { error: confirmError } = await stripe.confirmCardPayment(response.client_secret);
-            if (confirmError) {
-              throw new Error(confirmError.message);
-            }
-          }
         }
+        
+        console.log('Payment response:', response);
 
         // If we get here, the payment was successful
         navigate('/thank-you', { 
@@ -314,8 +318,8 @@ const DonationFormContent = () => {
             isSubscription,
             paymentType: isSubscription ? 'monthly' : 'one-time',
             paymentId: response.id,
-            connectedAccountId: response.connected_account,
-            recipientName: response.connected_account ? 'Connected Account' : 'Main Organization'
+            connectedAccountId,
+            recipientName: connectedAccountId ? 'Connected Account' : 'Main Organization'
           } 
         });
       } catch (error) {
@@ -450,10 +454,40 @@ const DonationFormContent = () => {
   );
 };
 
-const DonationForm = () => (
-  <Elements stripe={stripePromise}>
-    <DonationFormContent />
-  </Elements>
-);
+const DonationForm = () => {
+  const [useConnectedAccount, setUseConnectedAccount] = useState(true);
+  const [stripeInstance, setStripeInstance] = useState(null);
+  const connectedAccountId = useConnectedAccount ? CONNECTED_ACCOUNT_ID : null;
+  
+  // Initialize or reinitialize Stripe when connected account status changes
+  useEffect(() => {
+    const initializeStripe = async () => {
+      const stripePromise = getStripePromise(connectedAccountId);
+      setStripeInstance(stripePromise);
+      
+      // Log which account is being used
+      if (connectedAccountId) {
+        console.log(`Using Stripe with connected account: ${connectedAccountId}`);
+      } else {
+        console.log('Using Stripe with platform account');
+      }
+    };
+    
+    initializeStripe();
+  }, [connectedAccountId]);
+  
+  if (!stripeInstance) {
+    return <div>Loading payment system...</div>;
+  }
+  
+  return (
+    <Elements stripe={stripeInstance}>
+      <DonationFormContent 
+        initialConnectedAccountState={useConnectedAccount} 
+        setUseConnectedAccount={setUseConnectedAccount}
+      />
+    </Elements>
+  );
+};
 
 export default DonationForm;
